@@ -540,7 +540,7 @@ func (c *conn) IsColumnExists(ctx context.Context, tableName, columnName string)
 		return false, xerrors.WithStackTrace(fmt.Errorf("table '%s' not exist", tableName))
 	}
 
-	err = retry.Retry(ctx, func(ctx context.Context) (err error) {
+	err = c.retryIdempotent(ctx, func(ctx context.Context) (err error) {
 		desc, err := c.session.DescribeTable(ctx, tableName)
 		if err != nil {
 			return err
@@ -554,7 +554,7 @@ func (c *conn) IsColumnExists(ctx context.Context, tableName, columnName string)
 		}
 
 		return nil
-	}, retry.WithIdempotent(true))
+	})
 	if err != nil {
 		return false, xerrors.WithStackTrace(err)
 	}
@@ -575,7 +575,7 @@ func (c *conn) GetColumns(ctx context.Context, tableName string) (columns []stri
 		return nil, xerrors.WithStackTrace(fmt.Errorf("table '%s' not exist", tableName))
 	}
 
-	err = retry.Retry(ctx, func(ctx context.Context) (err error) {
+	err = c.retryIdempotent(ctx, func(ctx context.Context) (err error) {
 		desc, err := c.session.DescribeTable(ctx, tableName)
 		if err != nil {
 			return err
@@ -585,7 +585,7 @@ func (c *conn) GetColumns(ctx context.Context, tableName string) (columns []stri
 		}
 
 		return nil
-	}, retry.WithIdempotent(true))
+	})
 	if err != nil {
 		return nil, xerrors.WithStackTrace(err)
 	}
@@ -614,7 +614,7 @@ func (c *conn) GetColumnType(ctx context.Context, tableName, columnName string) 
 		return "", xerrors.WithStackTrace(fmt.Errorf("column '%s' not exist in table '%s'", columnName, tableName))
 	}
 
-	err = retry.Retry(ctx, func(ctx context.Context) (err error) {
+	err = c.retryIdempotent(ctx, func(ctx context.Context) (err error) {
 		desc, err := c.session.DescribeTable(ctx, tableName)
 		if err != nil {
 			return err
@@ -628,7 +628,7 @@ func (c *conn) GetColumnType(ctx context.Context, tableName, columnName string) 
 		}
 
 		return nil
-	}, retry.WithIdempotent(true))
+	})
 	if err != nil {
 		return "", xerrors.WithStackTrace(err)
 	}
@@ -649,7 +649,7 @@ func (c *conn) GetPrimaryKeys(ctx context.Context, tableName string) (pkCols []s
 		return nil, xerrors.WithStackTrace(fmt.Errorf("table '%s' not exist", tableName))
 	}
 
-	err = retry.Retry(ctx, func(ctx context.Context) (err error) {
+	err = c.retryIdempotent(ctx, func(ctx context.Context) (err error) {
 		desc, err := c.session.DescribeTable(ctx, tableName)
 		if err != nil {
 			return err
@@ -657,7 +657,7 @@ func (c *conn) GetPrimaryKeys(ctx context.Context, tableName string) (pkCols []s
 		pkCols = append(pkCols, desc.PrimaryKey...)
 
 		return nil
-	}, retry.WithIdempotent(true))
+	})
 	if err != nil {
 		return nil, xerrors.WithStackTrace(err)
 	}
@@ -726,11 +726,11 @@ func (c *conn) getTables(ctx context.Context, absPath string, recursive, exclude
 	}
 
 	var d scheme.Directory
-	err := retry.Retry(ctx, func(ctx context.Context) (err error) {
+	err := c.retryIdempotent(ctx, func(ctx context.Context) (err error) {
 		d, err = c.connector.parent.Scheme().ListDirectory(ctx, absPath)
 
 		return err
-	}, retry.WithIdempotent(true))
+	})
 	if err != nil {
 		return nil, xerrors.WithStackTrace(err)
 	}
@@ -763,11 +763,11 @@ func (c *conn) GetTables(ctx context.Context, folder string, recursive, excludeS
 	absPath := c.normalizePath(folder)
 
 	var e scheme.Entry
-	err := retry.Retry(ctx, func(ctx context.Context) (err error) {
+	err := c.retryIdempotent(ctx, func(ctx context.Context) (err error) {
 		e, err = c.connector.parent.Scheme().DescribePath(ctx, absPath)
 
 		return err
-	}, retry.WithIdempotent(true))
+	})
 	if err != nil {
 		return nil, xerrors.WithStackTrace(err)
 	}
@@ -806,7 +806,7 @@ func (c *conn) GetIndexes(ctx context.Context, tableName string) (indexes []stri
 		return nil, xerrors.WithStackTrace(fmt.Errorf("table '%s' not exist", tableName))
 	}
 
-	err = retry.Retry(ctx, func(ctx context.Context) (err error) {
+	err = c.retryIdempotent(ctx, func(ctx context.Context) (err error) {
 		desc, err := c.session.DescribeTable(ctx, tableName)
 		if err != nil {
 			return err
@@ -816,12 +816,25 @@ func (c *conn) GetIndexes(ctx context.Context, tableName string) (indexes []stri
 		}
 
 		return nil
-	}, retry.WithIdempotent(true))
+	})
 	if err != nil {
 		return nil, xerrors.WithStackTrace(err)
 	}
 
 	return indexes, nil
+}
+
+func (c *conn) retryIdempotent(ctx context.Context, f func(ctx context.Context) error) error {
+	err := retry.Retry(ctx, f,
+		retry.WithIdempotent(true),
+		retry.WithTrace(c.connector.traceRetry),
+		retry.WithLimiter(c.connector.retryLimiter),
+	)
+	if err != nil {
+		return xerrors.WithStackTrace(err)
+	}
+
+	return nil
 }
 
 func (c *conn) GetIndexColumns(ctx context.Context, tableName, indexName string) (columns []string, _ error) {
@@ -837,7 +850,7 @@ func (c *conn) GetIndexColumns(ctx context.Context, tableName, indexName string)
 		return nil, xerrors.WithStackTrace(fmt.Errorf("table '%s' not exist", tableName))
 	}
 
-	err = retry.Retry(ctx, func(ctx context.Context) (err error) {
+	err = c.retryIdempotent(ctx, func(ctx context.Context) (err error) {
 		desc, err := c.session.DescribeTable(ctx, tableName)
 		if err != nil {
 			return err
@@ -851,7 +864,7 @@ func (c *conn) GetIndexColumns(ctx context.Context, tableName, indexName string)
 		}
 
 		return xerrors.WithStackTrace(fmt.Errorf("index '%s' not found in table '%s'", indexName, tableName))
-	}, retry.WithIdempotent(true))
+	})
 	if err != nil {
 		return nil, xerrors.WithStackTrace(err)
 	}
